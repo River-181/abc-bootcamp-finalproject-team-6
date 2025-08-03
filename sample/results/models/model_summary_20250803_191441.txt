@@ -1,0 +1,27 @@
+고객 이탈 예측 모델 - 최종 결과 보고서
+==================================================
+
+모델명: Gradient Boosting
+학습일시: 20250803_191441
+
+성능 지표:
+  - Accuracy: 0.8050
+  - Precision: 0.0000
+  - Recall: 0.0000
+  - F1-Score: 0.0000
+  - AUC: 0.5684
+
+최적화된 하이퍼파라미터:
+  - learning_rate: 0.01
+  - max_depth: 3
+  - n_estimators: 100
+  - subsample: 0.8
+
+모델 비교 결과:
+  3. Gradient Boosting: AUC 0.5128
+  6. SVM: AUC 0.4885
+  1. Logistic Regression: AUC 0.4823
+  5. KNN: AUC 0.4796
+  2. Random Forest: AUC 0.4780
+  4. Decision Tree: AUC 0.4645
+  7. Naive Bayes: AUC 0.4635
