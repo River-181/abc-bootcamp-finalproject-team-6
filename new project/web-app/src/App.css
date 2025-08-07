@@ -1,0 +1,366 @@
+/**
+ * NoiseBuddy Dashboard Styles
+ * 실시간 센서 데이터 대시보드를 위한 CSS 스타일
+ */
+
+.app {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #333;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.app-header h1 {
+  color: white;
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-connected {
+  background: rgba(46, 204, 113, 0.2);
+  color: #27ae60;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+}
+
+.status-connected .status-indicator {
+  background: #27ae60;
+}
+
+.status-connecting {
+  background: rgba(241, 196, 15, 0.2);
+  color: #f39c12;
+  border: 1px solid rgba(241, 196, 15, 0.3);
+}
+
+.status-connecting .status-indicator {
+  background: #f39c12;
+}
+
+.status-disconnected,
+.status-error {
+  background: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.status-disconnected .status-indicator,
+.status-error .status-indicator {
+  background: #e74c3c;
+}
+
+.app-main {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.current-data-section,
+.history-section {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 15px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.current-data-section h2,
+.history-section h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #2c3e50;
+  font-size: 1.5rem;
+}
+
+.sensor-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.device-info {
+  text-align: center;
+  padding: 1rem;
+  background: rgba(52, 152, 219, 0.1);
+  border-radius: 10px;
+  border-left: 4px solid #3498db;
+}
+
+.device-info h3 {
+  margin: 0;
+  color: #2980b9;
+  font-size: 1.2rem;
+}
+
+.device-info p {
+  margin: 0.5rem 0 0 0;
+  color: #7f8c8d;
+  font-size: 0.9rem;
+}
+
+.sensor-gauges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.gauge-container {
+  text-align: center;
+}
+
+.gauge-container h4 {
+  margin: 0 0 1rem 0;
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+.gauge {
+  position: relative;
+  width: 100%;
+  height: 30px;
+  background: #ecf0f1;
+  border-radius: 15px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.gauge-fill {
+  height: 100%;
+  border-radius: 15px;
+  transition: width 0.5s ease-in-out;
+  position: relative;
+}
+
+.alert-low {
+  background: linear-gradient(90deg, #2ecc71, #27ae60);
+}
+
+.alert-medium {
+  background: linear-gradient(90deg, #f39c12, #e67e22);
+}
+
+.alert-high {
+  background: linear-gradient(90deg, #e74c3c, #c0392b);
+}
+
+.gauge-value {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-weight: bold;
+  color: white;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+.gauge-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  margin-top: 0.5rem;
+}
+
+.no-data {
+  text-align: center;
+  padding: 3rem 0;
+  color: #7f8c8d;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #ecf0f1;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 1rem auto;
+}
+
+.data-history {
+  background: #f8f9fa;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.history-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  background: #34495e;
+  color: white;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid #dee2e6;
+  transition: background-color 0.2s ease;
+}
+
+.history-item:hover {
+  background-color: rgba(52, 152, 219, 0.05);
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-time {
+  font-family: monospace;
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+.history-device {
+  font-weight: 500;
+  color: #495057;
+}
+
+.history-vibration,
+.history-noise {
+  font-weight: bold;
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
+  text-align: center;
+}
+
+.history-vibration.alert-low,
+.history-noise.alert-low {
+  background: rgba(46, 204, 113, 0.2);
+  color: #27ae60;
+}
+
+.history-vibration.alert-medium,
+.history-noise.alert-medium {
+  background: rgba(243, 156, 18, 0.2);
+  color: #e67e22;
+}
+
+.history-vibration.alert-high,
+.history-noise.alert-high {
+  background: rgba(231, 76, 60, 0.2);
+  color: #c0392b;
+}
+
+.no-history {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.app-footer {
+  text-align: center;
+  padding: 2rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+}
+
+/* 애니메이션 */
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    gap: 1rem;
+    text-align: center;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+
+  .sensor-gauges {
+    grid-template-columns: 1fr;
+  }
+
+  .history-header,
+  .history-item {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .history-header {
+    display: none; /* 모바일에서는 헤더 숨김 */
+  }
+
+  .history-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+
+  .history-time::before {
+    content: "시간: ";
+    font-weight: bold;
+  }
+
+  .history-device::before {
+    content: "디바이스: ";
+    font-weight: bold;
+  }
+
+  .history-vibration::before {
+    content: "진동: ";
+    font-weight: bold;
+  }
+
+  .history-noise::before {
+    content: "소음: ";
+    font-weight: bold;
+  }
+}
