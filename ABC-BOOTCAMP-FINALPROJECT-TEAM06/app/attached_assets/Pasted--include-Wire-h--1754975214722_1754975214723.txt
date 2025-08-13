@@ -1,0 +1,577 @@
+// 마이크 + 진동 하이브리드 감지 시스템
+// 음성과 진동을 동시에 감지하는 통합 시스템
+
+#include <Wire.h>
+
+// ========== 핀 설정 ==========
+// 마이크 센서
+const int MIC_ANALOG_PIN = A0;
+const int MIC_DIGITAL_PIN = 2;
+
+// GY-521 진동 센서 (I2C)
+const int MPU_ADDR = 0x68;
+const int PWR_MGMT_1 = 0x6B;
+const int ACCEL_XOUT_H = 0x3B;
+
+// LED 출력
+const int LED_MIC_DETECTED = 8;      // 마이크 감지 (빨간색)
+const int LED_VIBRATION_DETECTED = 9; // 진동 감지 (파란색)
+const int LED_SPEAKING = 10;         // 말하는 중 (녹색)
+const int LED_CONTINUOUS_VIB = 11;   // 지속적 진동 (노란색)
+const int BUZZER_PIN = 12;           // 알림 부저
+
+// ========== 감지 설정 ==========
+const int SAMPLE_SIZE = 80;
+const int SAMPLING_DELAY = 60;
+
+// 마이크 임계값
+float VOICE_AMPLITUDE_MIN = 25;
+float VOICE_AMPLITUDE_MAX = 350;
+const float VOICE_CONFIDENCE_THRESHOLD = 0.6;
+
+// 진동 임계값
+const float LIGHT_VIBRATION_THRESHOLD = 1.5;
+const float STRONG_VIBRATION_THRESHOLD = 4.0;
+const float SHOCK_THRESHOLD = 8.0;
+
+// ========== 전역 변수 ==========
+// 마이크 관련
+int backgroundLevel = 512;
+unsigned long lastVoiceTime = 0;
+unsigned long voiceStartTime = 0;
+bool isSpeaking = false;
+const int VOICE_HISTORY_SIZE = 12;
+bool voiceHistory[VOICE_HISTORY_SIZE] = {false};
+int voiceHistoryIndex = 0;
+
+// 진동 관련
+float baselineX = 0, baselineY = 0, baselineZ = 0;
+bool vibrationCalibrated = false;
+unsigned long lastVibrationTime = 0;
+unsigned long vibrationStartTime = 0;
+bool isContinuousVibration = false;
+const int VIB_HISTORY_SIZE = 10;
+float vibrationHistory[VIB_HISTORY_SIZE] = {0};
+int vibrationHistoryIndex = 0;
+
+// 시스템 상태
+bool micInitialized = false;
+bool gyroInitialized = false;
+int audioSamples[SAMPLE_SIZE];
+
+// ========== 구조체 정의 ==========
+struct VoiceFeatures {
+  float amplitude;
+  float variation;
+  float consistency;
+  float confidence;
+};
+
+struct VibrationFeatures {
+  float intensity;
+  float type; // 0=none, 1=light, 2=strong, 3=shock
+  bool isContinuous;
+};
+
+enum DetectionType {
+  NOTHING,
+  VOICE_ONLY,
+  VIBRATION_ONLY,
+  BOTH_DETECTED
+};
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  
+  // 핀 초기화
+  pinMode(MIC_DIGITAL_PIN, INPUT);
+  pinMode(LED_MIC_DETECTED, OUTPUT);
+  pinMode(LED_VIBRATION_DETECTED, OUTPUT);
+  pinMode(LED_SPEAKING, OUTPUT);
+  pinMode(LED_CONTINUOUS_VIB, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  
+  Serial.println("=== 하이브리드 감지 시스템 ===");
+  Serial.println("🎤 마이크 센서 + 🔔 진동 센서");
+  Serial.println("🔴 8번 LED: 마이크 감지");
+  Serial.println("🔵 9번 LED: 진동 감지");
+  Serial.println("🟢 10번 LED: 말하는 중");
+  Serial.println("🟡 11번 LED: 지속적 진동");
+  
+  // LED 테스트
+  testAllLEDs();
+  
+  // 센서 초기화
+  initializeSensors();
+  
+  Serial.println("🎯 하이브리드 감지 시작!");
+  delay(1000);
+}
+
+void loop() {
+  // 두 센서에서 데이터 수집
+  VoiceFeatures voice = {0};
+  VibrationFeatures vibration = {0};
+  
+  bool voiceValid = false;
+  bool vibrationValid = false;
+  
+  // 마이크 분석
+  if(micInitialized) {
+    sampleAudio();
+    voice = analyzeVoice();
+    voiceValid = true;
+  }
+  
+  // 진동 분석  
+  if(gyroInitialized) {
+    vibration = analyzeVibration();
+    vibrationValid = true;
+  }
+  
+  // 통합 감지 로직
+  DetectionType detection = integratedDetection(voice, vibration, voiceValid, vibrationValid);
+  
+  // 활동 추적 업데이트
+  updateActivities(voice, vibration, detection);
+  
+  // 출력 제어
+  controlAllOutputs(detection, voice, vibration);
+  
+  // 결과 출력
+  printIntegratedAnalysis(voice, vibration, detection, voiceValid, vibrationValid);
+  
+  delay(70); // 70ms 간격
+}
+
+void initializeSensors() {
+  Serial.println("\n🔧 센서 초기화 중...");
+  
+  // 마이크 초기화
+  Serial.print("🎤 마이크 센서... ");
+  micInitialized = initializeMicrophone();
+  if(micInitialized) {
+    Serial.println("✅ 성공");
+  } else {
+    Serial.println("❌ 실패");
+  }
+  
+  // 진동 센서 초기화
+  Serial.print("🔔 진동 센서... ");
+  gyroInitialized = initializeGyro();
+  if(gyroInitialized) {
+    Serial.println("✅ 성공");
+    calibrateVibrationBaseline();
+  } else {
+    Serial.println("❌ 실패 (연결 확인 필요)");
+  }
+  
+  if(!micInitialized && !gyroInitialized) {
+    Serial.println("⚠️ 모든 센서 초기화 실패!");
+  }
+}
+
+bool initializeMicrophone() {
+  // 마이크 캘리브레이션
+  long sum = 0;
+  int samples = 30;
+  
+  for(int i = 0; i < samples; i++) {
+    sum += analogRead(MIC_ANALOG_PIN);
+    delay(50);
+  }
+  
+  backgroundLevel = sum / samples;
+  
+  // 감도 자동 조정
+  int noise = 0;
+  for(int i = 0; i < 20; i++) {
+    int val1 = analogRead(MIC_ANALOG_PIN);
+    delay(10);
+    int val2 = analogRead(MIC_ANALOG_PIN);
+    noise += abs(val2 - val1);
+    delay(10);
+  }
+  noise = noise / 20;
+  
+  VOICE_AMPLITUDE_MIN = max(20.0, noise * 1.2);
+  VOICE_AMPLITUDE_MAX = min(400.0, noise * 6.0);
+  
+  Serial.print("(배경: ");
+  Serial.print(backgroundLevel);
+  Serial.print(", 임계값: ");
+  Serial.print(VOICE_AMPLITUDE_MIN, 0);
+  Serial.print("-");
+  Serial.print(VOICE_AMPLITUDE_MAX, 0);
+  Serial.print(") ");
+  
+  return true; // 마이크는 항상 사용 가능
+}
+
+bool initializeGyro() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(PWR_MGMT_1);
+  Wire.write(0);
+  int result = Wire.endTransmission();
+  
+  if(result != 0) return false;
+  
+  delay(100);
+  
+  // WHO_AM_I 확인
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x75);
+  Wire.endTransmission();
+  Wire.requestFrom(MPU_ADDR, 1);
+  
+  if(Wire.available()) {
+    int whoAmI = Wire.read();
+    return (whoAmI == 0x68);
+  }
+  
+  return false;
+}
+
+void calibrateVibrationBaseline() {
+  Serial.print("진동 기준값 측정 중... ");
+  
+  float sumX = 0, sumY = 0, sumZ = 0;
+  int samples = 30;
+  int successCount = 0;
+  
+  for(int i = 0; i < samples; i++) {
+    float x, y, z;
+    if(readAcceleration(x, y, z)) {
+      sumX += x;
+      sumY += y;
+      sumZ += z;
+      successCount++;
+    }
+    delay(50);
+  }
+  
+  if(successCount > 0) {
+    baselineX = sumX / successCount;
+    baselineY = sumY / successCount;
+    baselineZ = sumZ / successCount;
+    vibrationCalibrated = true;
+    
+    Serial.print("완료 (");
+    Serial.print(baselineX, 2);
+    Serial.print(", ");
+    Serial.print(baselineY, 2);
+    Serial.print(", ");
+    Serial.print(baselineZ, 2);
+    Serial.print(")");
+  }
+}
+
+void sampleAudio() {
+  for(int i = 0; i < SAMPLE_SIZE; i++) {
+    audioSamples[i] = analogRead(MIC_ANALOG_PIN);
+    delayMicroseconds(SAMPLING_DELAY);
+  }
+}
+
+VoiceFeatures analyzeVoice() {
+  VoiceFeatures voice;
+  
+  // 기본 통계
+  long sum = 0;
+  int maxVal = 0, minVal = 1023;
+  
+  for(int i = 0; i < SAMPLE_SIZE; i++) {
+    sum += audioSamples[i];
+    if(audioSamples[i] > maxVal) maxVal = audioSamples[i];
+    if(audioSamples[i] < minVal) minVal = audioSamples[i];
+  }
+  
+  float average = sum / (float)SAMPLE_SIZE;
+  voice.amplitude = maxVal - minVal;
+  
+  // 변화량 계산
+  int changes = 0;
+  for(int i = 1; i < SAMPLE_SIZE; i++) {
+    if(abs(audioSamples[i] - audioSamples[i-1]) > 8) {
+      changes++;
+    }
+  }
+  voice.variation = (float)changes / SAMPLE_SIZE;
+  
+  // 일관성 계산
+  float threshold = average + (voice.amplitude * 0.15);
+  int consistent = 0;
+  for(int i = 0; i < SAMPLE_SIZE; i++) {
+    if(abs(audioSamples[i] - average) > threshold) {
+      consistent++;
+    }
+  }
+  voice.consistency = (float)consistent / SAMPLE_SIZE;
+  
+  // 신뢰도 계산
+  voice.confidence = 0;
+  if(voice.amplitude > VOICE_AMPLITUDE_MIN && voice.amplitude < VOICE_AMPLITUDE_MAX) {
+    voice.confidence += 0.4;
+  }
+  if(voice.variation > 0.15 && voice.variation < 0.7) {
+    voice.confidence += 0.3;
+  }
+  if(voice.consistency > 0.25) {
+    voice.confidence += 0.3;
+  }
+  
+  return voice;
+}
+
+VibrationFeatures analyzeVibration() {
+  VibrationFeatures vib = {0, 0, false};
+  
+  if(!vibrationCalibrated) return vib;
+  
+  float x, y, z;
+  if(!readAcceleration(x, y, z)) return vib;
+  
+  // 진동 강도 계산
+  float deltaX = x - baselineX;
+  float deltaY = y - baselineY;
+  float deltaZ = z - baselineZ;
+  
+  vib.intensity = sqrt(deltaX*deltaX + deltaY*deltaY + deltaZ*deltaZ);
+  
+  // 진동 타입 분류
+  if(vib.intensity > SHOCK_THRESHOLD) {
+    vib.type = 3; // 충격
+  } else if(vib.intensity > STRONG_VIBRATION_THRESHOLD) {
+    vib.type = 2; // 강한 진동
+  } else if(vib.intensity > LIGHT_VIBRATION_THRESHOLD) {
+    vib.type = 1; // 가벼운 진동
+  } else {
+    vib.type = 0; // 진동 없음
+  }
+  
+  // 지속성 확인
+  updateVibrationHistory(vib.intensity);
+  float avgVibration = calculateAverageVibration();
+  vib.isContinuous = (avgVibration > LIGHT_VIBRATION_THRESHOLD);
+  
+  return vib;
+}
+
+bool readAcceleration(float &x, float &y, float &z) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(ACCEL_XOUT_H);
+  Wire.endTransmission();
+  Wire.requestFrom(MPU_ADDR, 6);
+  
+  if(Wire.available() >= 6) {
+    int16_t rawX = (Wire.read() << 8) | Wire.read();
+    int16_t rawY = (Wire.read() << 8) | Wire.read();
+    int16_t rawZ = (Wire.read() << 8) | Wire.read();
+    
+    x = rawX / 16384.0;
+    y = rawY / 16384.0;
+    z = rawZ / 16384.0;
+    
+    return true;
+  }
+  
+  return false;
+}
+
+DetectionType integratedDetection(VoiceFeatures voice, VibrationFeatures vib, bool voiceValid, bool vibValid) {
+  bool voiceDetected = false;
+  bool vibrationDetected = false;
+  
+  // 음성 감지
+  if(voiceValid && voice.confidence > VOICE_CONFIDENCE_THRESHOLD) {
+    if(voice.amplitude > 15 && voice.variation > 0.1 && voice.variation < 0.8) {
+      voiceDetected = true;
+    }
+  }
+  
+  // 진동 감지
+  if(vibValid && vib.type > 0) {
+    vibrationDetected = true;
+  }
+  
+  // 통합 판정
+  if(voiceDetected && vibrationDetected) {
+    return BOTH_DETECTED;
+  } else if(voiceDetected) {
+    return VOICE_ONLY;
+  } else if(vibrationDetected) {
+    return VIBRATION_ONLY;
+  } else {
+    return NOTHING;
+  }
+}
+
+void updateActivities(VoiceFeatures voice, VibrationFeatures vib, DetectionType detection) {
+  unsigned long currentTime = millis();
+  
+  // 음성 활동 추적
+  bool currentVoice = (detection == VOICE_ONLY || detection == BOTH_DETECTED);
+  voiceHistory[voiceHistoryIndex] = currentVoice;
+  voiceHistoryIndex = (voiceHistoryIndex + 1) % VOICE_HISTORY_SIZE;
+  
+  int voiceCount = 0;
+  for(int i = 0; i < VOICE_HISTORY_SIZE; i++) {
+    if(voiceHistory[i]) voiceCount++;
+  }
+  
+  // 말하기 시작/끝 감지
+  if(!isSpeaking && voiceCount >= 4) {
+    isSpeaking = true;
+    voiceStartTime = currentTime;
+    Serial.println("🎤 말하기 시작!");
+    tone(BUZZER_PIN, 1200, 150);
+  }
+  
+  if(isSpeaking && voiceCount <= 1) {
+    isSpeaking = false;
+    Serial.print("🔇 말하기 종료 (");
+    Serial.print(currentTime - voiceStartTime);
+    Serial.println("ms)");
+    tone(BUZZER_PIN, 800, 100);
+  }
+  
+  if(currentVoice) {
+    lastVoiceTime = currentTime;
+  }
+  
+  // 진동 활동 추적
+  bool currentVibration = (detection == VIBRATION_ONLY || detection == BOTH_DETECTED);
+  
+  if(!isContinuousVibration && vib.isContinuous) {
+    isContinuousVibration = true;
+    vibrationStartTime = currentTime;
+    Serial.println("🔔 지속적 진동 시작!");
+  }
+  
+  if(isContinuousVibration && !vib.isContinuous) {
+    isContinuousVibration = false;
+    Serial.print("⚪ 진동 종료 (");
+    Serial.print(currentTime - vibrationStartTime);
+    Serial.println("ms)");
+  }
+  
+  if(currentVibration) {
+    lastVibrationTime = currentTime;
+    
+    // 충격 감지시 특별 알림
+    if(vib.type == 3) {
+      tone(BUZZER_PIN, 2000, 200);
+      delay(100);
+      tone(BUZZER_PIN, 2000, 200);
+    }
+  }
+}
+
+void controlAllOutputs(DetectionType detection, VoiceFeatures voice, VibrationFeatures vib) {
+  unsigned long currentTime = millis();
+  
+  // 모든 LED 초기화
+  digitalWrite(LED_MIC_DETECTED, LOW);
+  digitalWrite(LED_VIBRATION_DETECTED, LOW);
+  digitalWrite(LED_SPEAKING, LOW);
+  digitalWrite(LED_CONTINUOUS_VIB, LOW);
+  
+  // 마이크 LED (8번핀)
+  if(currentTime - lastVoiceTime < 500) {
+    digitalWrite(LED_MIC_DETECTED, HIGH);
+  }
+  
+  // 진동 LED (9번핀)
+  if(currentTime - lastVibrationTime < 300) {
+    digitalWrite(LED_VIBRATION_DETECTED, HIGH);
+  }
+  
+  // 말하는 중 LED (10번핀)
+  if(isSpeaking) {
+    digitalWrite(LED_SPEAKING, HIGH);
+  }
+  
+  // 지속적 진동 LED (11번핀)
+  if(isContinuousVibration) {
+    digitalWrite(LED_CONTINUOUS_VIB, HIGH);
+  }
+}
+
+void printIntegratedAnalysis(VoiceFeatures voice, VibrationFeatures vib, DetectionType detection, bool voiceValid, bool vibValid) {
+  Serial.print("🎯 통합분석 - ");
+  
+  if(voiceValid) {
+    Serial.print("🎤진폭:");
+    Serial.print(voice.amplitude, 0);
+    Serial.print("/신뢰:");
+    Serial.print(voice.confidence, 2);
+  } else {
+    Serial.print("🎤❌");
+  }
+  
+  Serial.print(" | ");
+  
+  if(vibValid) {
+    Serial.print("🔔강도:");
+    Serial.print(vib.intensity, 2);
+    Serial.print("/타입:");
+    Serial.print(vib.type, 0);
+  } else {
+    Serial.print("🔔❌");
+  }
+  
+  Serial.print(" -> ");
+  
+  switch(detection) {
+    case VOICE_ONLY:
+      Serial.println("🔴 음성 감지!");
+      break;
+    case VIBRATION_ONLY:
+      Serial.print("🔵 진동 감지");
+      if(vib.type == 3) Serial.println(" (충격!)");
+      else if(vib.type == 2) Serial.println(" (강함)");
+      else Serial.println(" (가벼움)");
+      break;
+    case BOTH_DETECTED:
+      Serial.println("🟣 음성+진동 동시 감지!");
+      break;
+    default:
+      Serial.println("⚪ 감지 없음");
+      break;
+  }
+}
+
+void updateVibrationHistory(float intensity) {
+  vibrationHistory[vibrationHistoryIndex] = intensity;
+  vibrationHistoryIndex = (vibrationHistoryIndex + 1) % VIB_HISTORY_SIZE;
+}
+
+float calculateAverageVibration() {
+  float sum = 0;
+  for(int i = 0; i < VIB_HISTORY_SIZE; i++) {
+    sum += vibrationHistory[i];
+  }
+  return sum / VIB_HISTORY_SIZE;
+}
+
+void testAllLEDs() {
+  Serial.println("LED 테스트...");
+  
+  int leds[] = {LED_MIC_DETECTED, LED_VIBRATION_DETECTED, LED_SPEAKING, LED_CONTINUOUS_VIB};
+  String names[] = {"마이크", "진동", "말하는중", "지속진동"};
+  
+  for(int i = 0; i < 4; i++) {
+    Serial.print(names[i]);
+    Serial.print(" ");
+    digitalWrite(leds[i], HIGH);
+    delay(400);
+    digitalWrite(leds[i], LOW);
+    delay(200);
+  }
+  
+  tone(BUZZER_PIN, 1000, 200);
+  delay(300);
+  
+  Serial.println("완료");
+}
